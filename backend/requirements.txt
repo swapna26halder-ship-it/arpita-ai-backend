@@ -1,0 +1,16 @@
+
+
+fastapi
+uvicorn
+groq
+google-genai
+python-dotenv
+sqlalchemy
+pillow
+requests
+gtts
+python-multipart
+aiofiles
+jinja2
+bcrypt
+python-jose
