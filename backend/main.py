@@ -1,4 +1,7 @@
-
+from fastapi.staticfiles import StaticFiles
+from image_gen import router as image_gen_router
+from image_edit import router as image_edit_router
+from vision import router as vision_router
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +27,12 @@ app = FastAPI(
     title="Arpita AI",
     description="Personal AI Assistant",
     version="1.0.0"
+)
+
+app.mount(
+    "/image/generated",
+    StaticFiles(directory="generated"),
+    name="generated-images"
 )
 
 app.include_router(
@@ -80,27 +89,6 @@ async def chat(request: ChatRequest):
         "response": reply
     }
 
-@app.post("/analyze")
-def analyze_image():
-    return {
-        "status": "success",
-        "message": "Vision Analysis endpoint is working."
-    }
-
-@app.post("/edit")
-def edit_image():
-    return {
-        "status": "success",
-        "message": "Image Editing endpoint is working."
-    }
-
-
-@app.post("/generate")
-def generate_image():
-    return {
-        "status": "success",
-        "message": "Image Generation endpoint is working."
-    }
 
 @app.get("/features")
 async def features():

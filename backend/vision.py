@@ -1,12 +1,10 @@
-from fastapi import APIRouter,UploadFile, File, Form, HTTPException, status
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
-
-from pathlib import Path
-
 from google import genai
-from PIL import Image
+from google.genai import types
 
 from config import settings
+
 
 router = APIRouter()
 
@@ -14,23 +12,9 @@ client = genai.Client(
     api_key=settings.GEMINI_API_KEY
 )
 
-VISION_MODEL = "gemini-2.5-flash"
 
-
-    
-    
 class VisionResponse(BaseModel):
-    filename: str
-    content_type: str
-    prompt: str
-    message: str
-
-
-ALLOWED_TYPES = {
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-}
+    response: str
 
 
 @router.post("/analyze", response_model=VisionResponse)
@@ -38,16 +22,46 @@ async def analyze_image(
     image: UploadFile = File(...),
     prompt: str = Form("")
 ):
-    if image.content_type not in ALLOWED_TYPES:
+
+    if image.content_type not in {
+        "image/jpeg",
+        "image/png",
+        "image/webp"
+    }:
         raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Only JPG, PNG and WEBP images are allowed."
+            status_code=400,
+            detail="Only JPEG, PNG and WebP images are supported."
         )
 
-    return VisionResponse(
-        filename=image.filename or "uploaded_image",
-        content_type=image.content_type or "application/octet-stream",
-        prompt=prompt.strip(),
-        message="Image received successfully. Ready for AI vision analysis."
-    )
+    image_bytes = await image.read()
 
+    if not image_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail="Uploaded image is empty."
+        )
+
+    if not prompt.strip():
+        prompt = "Describe this image and explain the important details in it."
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-3.8-flash",
+            contents=[
+                types.Part.from_bytes(
+                    data=image_bytes,
+                    mime_type=image.content_type
+                ),
+                prompt
+            ]
+        )
+
+        return VisionResponse(
+            response=response.text
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Image analysis failed: {str(e)}"
+        )

@@ -12,6 +12,8 @@ class Settings:
     # API Keys
     GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+    POLLINATIONS_API_KEY = os.getenv("POLLINATIONS_API_KEY","")
+
 
     # Database
     DATABASE_URL = os.getenv(

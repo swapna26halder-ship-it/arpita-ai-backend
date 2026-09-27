@@ -1,27 +1,21 @@
-from io import BytesIO
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
-from PIL import Image, UnidentifiedImageError
-
+from config import settings
+import requests
+import uuid
 from pathlib import Path
+
 
 router = APIRouter()
 
 
+# Edited images will be stored in the generated folder
+EDITED_DIR = Path(settings.GENERATED_DIR)
+EDITED_DIR.mkdir(parents=True, exist_ok=True)
+
+
 class ImageEditResponse(BaseModel):
-    filename: str
-    content_type: str
-    prompt: str
-    message: str
-
-
-ALLOWED_TYPES = {
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-}
-
-MAX_FILE_SIZE = 10 * 1024 * 1024 # 10 MB
+    image_url: str
 
 
 @router.post("/edit", response_model=ImageEditResponse)
@@ -29,50 +23,119 @@ async def edit_image(
     image: UploadFile = File(...),
     prompt: str = Form(...)
 ):
+
     prompt = prompt.strip()
+
     if not prompt:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Prompt cannot be empty."
+            status_code=400,
+            detail="Edit prompt cannot be empty."
         )
 
-    if image.content_type not in ALLOWED_TYPES:
+    if image.content_type not in {
+        "image/jpeg",
+        "image/png",
+        "image/webp"
+    }:
         raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Only JPG, PNG and WEBP images are allowed."
+            status_code=400,
+            detail="Only JPEG, PNG and WebP images are supported."
         )
 
-    contents = await image.read()
+    api_key = settings.POLLINATIONS_API_KEY
 
-    if not contents:
+    if not api_key:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file is empty."
+            status_code=500,
+            detail="Pollinations API key is not configured."
         )
 
-    if len(contents) > MAX_FILE_SIZE:
+    image_bytes = await image.read()
+
+    if not image_bytes:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Image size must be under 10 MB."
+            status_code=400,
+            detail="Uploaded image is empty."
         )
+
+    # Pollinations image editing endpoint
+    url = "https://gen.pollinations.ai/v1/images/edits"
+
+    headers = {
+        "Authorization": f"Bearer {api_key}"
+    }
+
+    files = {
+        "image": (
+            image.filename or "image.png",
+            image_bytes,
+            image.content_type
+        )
+    }
+
+    data = {
+        "prompt": prompt,
+        "model": "gptimage"
+    }
 
     try:
-        img = Image.open(BytesIO(contents))
-        img.verify()
-    except (UnidentifiedImageError, OSError):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file is not a valid image."
+        response = requests.post(
+            url,
+            headers=headers,
+            files=files,
+            data=data,
+            timeout=180
         )
 
-    await image.seek(0)
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Pollinations editing failed: {response.text}"
+            )
 
-    # TODO: Call your AI image editing model here using `contents` and `prompt`
+        result = response.json()
 
-    return ImageEditResponse(
-        filename=image.filename or "uploaded_image",
-        content_type=image.content_type or "application/octet-stream",
-        prompt=prompt,
-        message="Image received successfully. Ready for AI editing."
-    )
+        # OpenAI-style image response
+        if not result.get("data"):
+            raise HTTPException(
+                status_code=502,
+                detail="No edited image was returned."
+            )
 
+        image_data = result["data"][0]
+
+        # Handle base64 response
+        if "b64_json" in image_data:
+            import base64
+
+            edited_bytes = base64.b64decode(
+                image_data["b64_json"]
+            )
+
+            filename = f"{uuid.uuid4().hex}.png"
+            file_path = EDITED_DIR / filename
+
+            file_path.write_bytes(edited_bytes)
+
+            image_url = f"/image/generated/{filename}"
+
+            return ImageEditResponse(
+                image_url=image_url
+            )
+
+        # Handle URL response if provider returns one
+        if "url" in image_data:
+            return ImageEditResponse(
+                image_url=image_data["url"]
+            )
+
+        raise HTTPException(
+            status_code=502,
+            detail="Pollinations returned an unsupported image response."
+        )
+
+    except requests.RequestException as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Image editing request failed: {str(e)}"
+        )
