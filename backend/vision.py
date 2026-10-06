@@ -8,9 +8,10 @@ from config import settings
 
 router = APIRouter()
 
-client = genai.Client(
-    api_key=settings.GEMINI_API_KEY
-)
+VISION_MODEL = "gemini-3.8-flash"
+
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 
 class VisionResponse(BaseModel):
@@ -18,22 +19,24 @@ class VisionResponse(BaseModel):
 
 
 @router.post("/analyze", response_model=VisionResponse)
-async def analyze_image(
+def analyze_image(
     image: UploadFile = File(...),
     prompt: str = Form("")
 ):
 
-    if image.content_type not in {
-        "image/jpeg",
-        "image/png",
-        "image/webp"
-    }:
+    if not settings.GEMINI_API_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="Gemini API key is not configured."
+        )
+
+    if image.content_type not in ALLOWED_TYPES:
         raise HTTPException(
             status_code=400,
             detail="Only JPEG, PNG and WebP images are supported."
         )
 
-    image_bytes = await image.read()
+    image_bytes = image.file.read()
 
     if not image_bytes:
         raise HTTPException(
@@ -41,25 +44,42 @@ async def analyze_image(
             detail="Uploaded image is empty."
         )
 
-    if not prompt.strip():
-        prompt = "Describe this image and explain the important details in it."
+    if len(image_bytes) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail="Image too large (max 10MB)."
+        )
+
+    question = prompt.strip() or (
+        "Describe this image and explain the important details in it."
+    )
 
     try:
-        response = client.models.generate_content(
-            model="gemini-3.8-flash",
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+        result = client.models.generate_content(
+            model=VISION_MODEL,
             contents=[
                 types.Part.from_bytes(
                     data=image_bytes,
                     mime_type=image.content_type
                 ),
-                prompt
+                question
             ]
         )
 
-        return VisionResponse(
-            response=response.text
-        )
+        text = (result.text or "").strip()
 
+        if not text:
+            raise HTTPException(
+                status_code=502,
+                detail="Gemini returned an empty response."
+            )
+
+        return VisionResponse(response=text)
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=502,

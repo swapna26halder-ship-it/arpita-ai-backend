@@ -44,8 +44,7 @@ async def generate_image(request: ImageRequest):
         )
 
     # Pollinations image endpoint
-    url = "https://gen.pollinations.ai/image/" + requests.utils.quote(prompt)
-
+    url = f"https://gen.pollinations.ai/image/{requests.utils.quote(prompt)}"
     params = {
         "model": "flux",
         "width": 1024,

@@ -1,7 +1,5 @@
 from fastapi.staticfiles import StaticFiles
-from image_gen import router as image_gen_router
-from image_edit import router as image_edit_router
-from vision import router as vision_router
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -52,10 +50,9 @@ app.include_router(
 
 app.include_router(
     vision_router,
-    prefix="/vision",
+    prefix="/image",
     tags=["Vision"]
 )
-
 
 app.add_middleware(
     CORSMiddleware,
