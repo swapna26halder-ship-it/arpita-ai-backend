@@ -9,8 +9,6 @@ from config import settings
 
 router = APIRouter()
 
-
-# Generated image storage
 GENERATED_DIR = Path(settings.GENERATED_DIR)
 GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -20,21 +18,17 @@ class ImageRequest(BaseModel):
 
 
 class ImageResponse(BaseModel):
-    image_url: HttpUrl
+    image_url: str
 
 
 @router.post("/generate", response_model=ImageResponse)
-async def generate_image(request: ImageRequest):
+def generate_image(request: ImageRequest):
 
     prompt = request.prompt.strip()
 
     if not prompt:
-        raise HTTPException(
-            status_code=400,
-            detail="Prompt cannot be empty."
-        )
+        raise HTTPException(status_code=400, detail="Prompt cannot be empty.")
 
-    # API key comes indirectly from .env through config.py
     api_key = settings.POLLINATIONS_API_KEY
 
     if not api_key:
@@ -43,38 +37,29 @@ async def generate_image(request: ImageRequest):
             detail="Pollinations API key is not configured."
         )
 
-    # Pollinations image endpoint
-    url = f"https://gen.pollinations.ai/image/{requests.utils.quote(prompt)}"
+    url = "https://gen.pollinations.ai/image/" + requests.utils.quote(prompt)
+
     params = {
         "model": "flux",
         "width": 1024,
         "height": 1024,
     }
 
-    headers = {
-        "Authorization": f"Bearer {api_key}"
-    }
+    headers = {"Authorization": f"Bearer {api_key}"}
 
     try:
         response = requests.get(
-            url,
-            params=params,
-            headers=headers,
-            timeout=120
+            url, params=params, headers=headers, timeout=120
         )
 
         if response.status_code != 200:
             raise HTTPException(
                 status_code=response.status_code,
-                detail="Pollinations image generation failed."
+                detail=f"Pollinations image generation failed: {response.text[:300]}"
             )
 
-        # Unique filename
         filename = f"{uuid.uuid4().hex}.png"
-        file_path = GENERATED_DIR / filename
-
-        # Save image on YOUR backend
-        file_path.write_bytes(response.content)
+        (GENERATED_DIR / filename).write_bytes(response.content)
 
     except requests.RequestException as e:
         raise HTTPException(
@@ -82,10 +67,4 @@ async def generate_image(request: ImageRequest):
             detail=f"Image generation request failed: {str(e)}"
         )
 
-    # Android receives YOUR backend URL,
-    # not the Pollinations URL or API key.
-    image_url = f"/image/generated/{filename}"
-
-    return ImageResponse(
-        image_url=image_url
-    )
+    return ImageResponse(image_url=f"/image/generated/{filename}")
